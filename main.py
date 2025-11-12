@@ -3480,7 +3480,10 @@ def run_async_loop(loop):
     """Async loop ni alohida threadda ishga tushirish"""
     asyncio.set_event_loop(loop)
     loop.run_forever()
-    
+
+async def dummy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Bu state ishlayapti! Haqiqiy logic qo'shing.")
+    return ConversationHandler.END  # Yoki keyingi state ga o'ting
     
 def main():
     logger.info("Bot ishga tushmoqda...")

@@ -1,0 +1,42 @@
+{
+    "templates": [
+        "1.pptx",
+        "2.pptx",
+        "3.pptx",
+        "4.pptx",
+        "5.pptx",
+        "6.pptx",
+        "7.pptx",
+        "8.pptx",
+        "9.pptx",
+        "10.pptx",
+        "11.pptx",
+        "12.pptx",
+        "13.pptx",
+        "14.pptx",
+        "15.pptx",
+        "16.pptx",
+        "17.pptx",
+        "18.pptx",
+        "19.pptx",
+        "20.pptx",
+        "21.pptx",
+        "22.pptx",
+        "23.pptx",
+        "24.pptx",
+        "25.pptx",
+        "26.pptx"
+    ],
+    "doc_type": "Sertifikat",
+    "selected_template": "C:\\Users\\1\\Desktop\\sert\\Sertifikat\\13.pptx",
+    "has_date_tag": true,
+    "present_tags": [
+        "{taqdirlangan}",
+        "{taqdirlovchi}",
+        "{sertifikat_matni}",
+        "{sana}",
+        "{qr_code}"
+    ],
+    "has_qr_code_tag": true,
+    "taqdirlangan": "Alisherov Farid"
+}

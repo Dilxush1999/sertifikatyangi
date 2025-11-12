@@ -1,0 +1,14 @@
+# Temp va log fayllar
+temp/
+*.log
+bot_db.sqlite  # DB ni yuklamang — qayta yarating
+*.pyc
+__pycache__/
+
+# Config va secrets (BOT_TOKEN bor!)
+config.json
+.env
+
+# OS fayllar
+.DS_Store
+Thumbs.db

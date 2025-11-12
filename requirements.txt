@@ -17,5 +17,6 @@ opencv-python==4.8.1.78
 numpy
 reportlab==4.0.7
 requests
+tenacity
 flask
 #pywin32==311

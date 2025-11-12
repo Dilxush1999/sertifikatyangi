@@ -5,7 +5,6 @@ import json
 import sqlite3
 import datetime
 import threading
-from flask import Flask, request
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
@@ -3481,7 +3480,8 @@ def run_async_loop(loop):
     """Async loop ni alohida threadda ishga tushirish"""
     asyncio.set_event_loop(loop)
     loop.run_forever()
-
+    
+    
 def main():
     logger.info("Bot ishga tushmoqda...")
     config = load_config()
@@ -3490,14 +3490,11 @@ def main():
     global BASE_DIR, TEMP_PATH, DB_PATH, FONT_DIR
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     TEMP_PATH = '/tmp'  # Render-da temp fayllar uchun
-    DB_PATH = os.path.join(TEMP_PATH, 'bot_db.sqlite')  # Vaqtinchalik DB (PostgreSQL ga o'tkazish tavsiya)
+    DB_PATH = os.path.join(TEMP_PATH, 'bot_db.sqlite')  # Vaqtinchalik DB
     FONT_DIR = os.path.join(BASE_DIR, 'Font')
     
     if not os.path.exists(TEMP_PATH):
         os.makedirs(TEMP_PATH)
-    
-    if not os.path.exists('bot_db.sqlite'):
-        logger.warning("bot_db.sqlite fayli yaratilmoqda...")
     
     try:
         init_db()
@@ -3507,21 +3504,12 @@ def main():
         logger.error(f"Ma'lumotlar bazasini ishga tushirishda xato: {str(e)}")
         return
     
-    # Telegram bot application
+    # Telegram bot application (polling rejimi — webhook o'rniga)
     app = ApplicationBuilder().token(config['BOT_TOKEN']).build()
     
-    # Queue worker ni ishga tushirish
-    async def post_init(application):
-        await start_queue_worker()
-        # Webhook sozlash (Render uchun)
-        webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'your-app.onrender.com')}/{config['BOT_TOKEN']}"
-        await application.bot.set_webhook(url=webhook_url)
-        logger.info(f"Webhook o'rnatildi: {webhook_url}")
-    
-    app.post_init = post_init
     app.add_error_handler(error_handler)
     
-    # Conversation handler (asl koddagi kabi, o'zgarishsiz)
+    # Conversation handler (to'liq states bilan — dummy handler lar bilan)
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
@@ -3529,7 +3517,45 @@ def main():
             MessageHandler(filters.TEXT & ~filters.COMMAND, any_message)
         ],
         states={
-            # ... (asl koddagi barcha states)
+            START: [MessageHandler(filters.TEXT & ~filters.COMMAND, any_message)],
+            DOCUMENT_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            TEMPLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            TAQDIRLANUVCHI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            SHRIFT1: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            TAQDIRLOVCHI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            SERTIFIKAT_MATNI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            SHRIFT2: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            SANA: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            BALANCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            PAYMENT_METHOD: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            CARD_PAYMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            UPLOAD_CHECK: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            ADMIN_PANEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            ADMIN_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            ADMIN_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            ADMIN_TOPUP: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            INFO_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            MANZIL_VA_EGA: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            SHABLON: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            SHABLON_NOMI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            SHABLON_SHRIFT1: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            SHABLON_MATNI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            SHABLON_SHRIFT2: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            SHABLON_SHRIFT3: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            TAKLIFNOMA_SHRIFT1: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            TAKLIFNOMA_SHRIFT2: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            PDF_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            DIPLOM_MATNI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            ADMIN_MESSAGE_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            ADMIN_MESSAGE_CONTENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            ADMIN_MESSAGE_RECIPIENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            CONTACT: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            CONTACT_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            CONFIG_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            SET_NEW_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            ADMIN_FOYDALANUVCHI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            QR_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
         },
         fallbacks=[
             CommandHandler("start", start),
@@ -3540,42 +3566,10 @@ def main():
 
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(handle_callback_query))
-    
-    # Flask app uchun webhook endpoint
-    flask_app = Flask(__name__)
-    
-    @flask_app.route(f'/{config["BOT_TOKEN"]}', methods=['POST'])
-    def webhook():
-        try:
-            update = Update.de_json(request.get_json(force=True), app.bot)
-            if update:
-                # Async update ni process qilish
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(app.process_update(update))
-                loop.close()
-            return 'OK'
-        except Exception as e:
-            logger.error(f"Webhook xatosi: {str(e)}")
-            return 'Error', 500
-    
-    @flask_app.route('/')
-    def health_check():
-        return "Bot ishlamoqda!", 200
-    
-    # Render portini olish
-    port = int(os.environ.get('PORT', 5000))
-    host = '0.0.0.0'
-    
-    # Async loop ni alohida threadda ishga tushirish (bot handlers uchun)
-    loop = asyncio.new_event_loop()
-    t = threading.Thread(target=run_async_loop, args=(loop,))
-    t.daemon = True
-    t.start()
-    
-    # Flask ni ishga tushirish
-    logger.info(f"Flask server ishga tushmoqda: {host}:{port}")
-    flask_app.run(host=host, port=port, debug=False)
+
+    # Polling rejimini ishga tushirish (parallel, qotmasdan — drop_pending_updates=True bilan)
+    logger.info("Bot polling rejimida ishga tushmoqda...")
+    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()

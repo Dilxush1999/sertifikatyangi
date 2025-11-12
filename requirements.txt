@@ -16,4 +16,6 @@ qrcode[pil]==7.4.2
 opencv-python==4.8.1.78
 numpy
 reportlab==4.0.7
+requests
+flask
 #pywin32==311

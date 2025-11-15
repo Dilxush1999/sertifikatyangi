@@ -15,7 +15,6 @@ from pptx import Presentation
 from pptx.util import Inches
 from io import BytesIO
 from PIL import Image
-import img2pdf
 from pptx.util import Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -24,15 +23,8 @@ from pptx.enum.text import PP_ALIGN
 from tenacity import retry, stop_after_attempt, wait_exponential
 import csv
 import io
-import img2pdf
-# Bosh importlarga qo'shing:
-from pdf2image import convert_from_path
 from PIL import ImageDraw, ImageFont
 import logging
-
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import inch
 from PIL import Image
 import shutil
 from contextlib import contextmanager
@@ -96,7 +88,7 @@ for path in [TEMP_PATH, USERS_PATH, SERTIFIKAT_PATH, TAKLIFNOMA_PATH, SHABLON_PA
     if not os.path.exists(path):
         os.makedirs(path)
 
-START, DOCUMENT_TYPE, TEMPLATE, TAQDIRLANUVCHI, SHRIFT1, TAQDIRLOVCHI, SERTIFIKAT_MATNI, SHRIFT2, SANA, BALANCE, PAYMENT_METHOD, CARD_PAYMENT, UPLOAD_CHECK, COMMENT, ADMIN_PANEL, ADMIN_ACTION, ADMIN_USER, ADMIN_TOPUP, INFO_TEXT, MANZIL_VA_EGA, SHABLON, SHABLON_NOMI, SHABLON_SHRIFT1, SHABLON_MATNI, SHABLON_SHRIFT2, SHABLON_SHRIFT3, TAKLIFNOMA_SHRIFT1, TAKLIFNOMA_SHRIFT2, PDF_CONFIRM, DIPLOM_MATNI, ADMIN_MESSAGE_TYPE, ADMIN_MESSAGE_CONTENT, ADMIN_MESSAGE_RECIPIENT, CONTACT, CONTACT_MESSAGE, CONFIG_PRICE, SET_NEW_PRICE, ADMIN_FOYDALANUVCHI, QR_CODE = range(39)
+START, DOCUMENT_TYPE, TEMPLATE, TAQDIRLANUVCHI, SHRIFT1, TAQDIRLOVCHI, SERTIFIKAT_MATNI, SHRIFT2, SANA, BALANCE, PAYMENT_METHOD, CARD_PAYMENT, UPLOAD_CHECK, COMMENT, ADMIN_PANEL, ADMIN_ACTION, ADMIN_USER, ADMIN_TOPUP, INFO_TEXT, MANZIL_VA_EGA, SHABLON, SHABLON_NOMI, SHABLON_SHRIFT1, SHABLON_MATNI, SHABLON_SHRIFT2, SHABLON_SHRIFT3, TAKLIFNOMA_SHRIFT1, TAKLIFNOMA_SHRIFT2, DIPLOM_MATNI, ADMIN_MESSAGE_TYPE, ADMIN_MESSAGE_CONTENT, ADMIN_MESSAGE_RECIPIENT, CONTACT, CONTACT_MESSAGE, CONFIG_PRICE, SET_NEW_PRICE, ADMIN_FOYDALANUVCHI, QR_CODE = range(38)
 SERTIFIKAT_TAGS = ["{taqdirlangan}", "{taqdirlovchi}", "{sertifikat_matni}", "{sana}", "{qr_code}"]
 TAKLIFNOMA_TAGS = ["{info_text}", "{manzil_va_ega}"]
 DIPLOM_TAGS = ["{taqdirlangan}", "{taqdirlovchi}", "{diplom_matni}", "{sana}", "{qr_code}"]
@@ -132,7 +124,7 @@ def load_config():
     try:
         with open('config.json', 'r') as f:
             config = json.load(f)
-        required_keys = ['BOT_TOKEN', 'CERTIFICATE_COST', 'TAKLIFNOMA_COST', 'SHABLON_COST', 'DIPLOM_COST', 'PDF_COST', 'REFERRAL_BONUS']
+        required_keys = ['BOT_TOKEN', 'CERTIFICATE_COST', 'TAKLIFNOMA_COST', 'SHABLON_COST', 'DIPLOM_COST', 'REFERRAL_BONUS']
         missing_keys = [key for key in required_keys if key not in config]
         if missing_keys:
             raise KeyError(f"Config faylida quyidagi kalitlar yo‘q: {missing_keys}")
@@ -744,38 +736,6 @@ async def convert_pptx_to_jpg(pptx_path, output_path, context):
             except Exception as e:
                 logger.error(f"QR kod faylini o'chirishda xato: {str(e)}")
         return False
-
-async def convert_pptx_to_pdf(pptx_path, output_path, context):
-    """PPTX dan PDF ga konvertatsiya qilish"""
-    try:
-        logger.info(f"Starting PPTX to PDF conversion: {pptx_path} -> {output_path}")
-        # Avval JPG ga o'tkazamiz
-        jpg_path = f"{output_path}.jpg"
-        success = await convert_pptx_to_jpg(pptx_path, jpg_path, context)
-        if not success:
-            logger.error(f"Failed to convert PPTX to JPG: {jpg_path}")
-            return False
-
-        # JPG ni PDF ga aylantiramiz (yuqori sifat bilan)
-        with open(jpg_path, "rb") as f:
-            img_data = f.read()
-
-        with open(output_path, "wb") as f:
-            # Yuqori sifatli PDF yaratish
-            f.write(img2pdf.convert(img_data, dpi=300))
-
-        logger.info(f"Successfully converted to PDF: {output_path}")
-        return True
-    except Exception as e:
-        logger.error(f"PPTX to PDF conversion error: {str(e)}", exc_info=True)
-        return False
-    finally:
-        if os.path.exists(jpg_path):
-            try:
-                os.remove(jpg_path)
-                logger.info(f"Removed temporary JPG file: {jpg_path}")
-            except Exception as e:
-                logger.error(f"Error removing JPG file {jpg_path}: {str(e)}")
 
 async def replace_text_and_font(prs, replacements, taqdirlanuvchi_font=None, other_font=None, info_text_font=None, 
                                 manzil_va_ega_font=None, shablon_nomi_font=None, shablon_matni_font=None, 
@@ -3117,17 +3077,25 @@ async def generate_document_internal(update: Update, context: ContextTypes.DEFAU
                     os.remove(output_jpg)
                     logger.info(f"Removed JPG file: {output_jpg}")
 
+        # Yangi qism: PDF so'rovi o'rniga to'g'ridan-to'g'ri bosh menyuga qaytish
         await update.message.reply_text(
             f"💸Balansingizdan {cost} so‘m yechildi.\n 💵Joriy balans: {user_data['balance']} so‘m\n"
             f"📊Umumiy natijalar soni: {user_data['result_count']}\n"
-            "Natijani PDF formatda olishni xohlaysizmi?",
+            "✅ Hujjat tayyor!",
             reply_markup=ReplyKeyboardMarkup(
-                [["Ha"], ["Yo‘q"], ["Bosh menyuga qaytish"]], one_time_keyboard=True, resize_keyboard=True)
+                [["🟢 Sertifikat tayyorlash", "🟢 Taklifnoma yasash"],
+                 ["🟢 Namuna orqali yasash", "🟢 Diplom yasash"],
+                 ["💰 Mening balansim", "💸 Balansni to‘ldirish"],
+                 ["📞 Biz bilan aloqa"]],
+                one_time_keyboard=True, resize_keyboard=True
+            )
         )
 
-        context.user_data['output_pptx'] = output_pptx
-        context.user_data['output_jpg'] = output_jpg
-        return PDF_CONFIRM
+        # Context ni tozalash (PDF bilan bog'liq ma'lumotlarni olib tashlash)
+        context.user_data.pop('output_pptx', None)
+        context.user_data.pop('output_jpg', None)
+        context.user_data.pop('output_pdf', None)
+        return START  # To'g'ridan-to'g'ri START ga qaytish
 
     except Exception as e:
         logger.error(f"Error generating document for user {user_id}: {str(e)}", exc_info=True)
@@ -3144,259 +3112,12 @@ async def generate_document_internal(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_text(
             f"❌ Hujjatni tayyorlashda xatolik yuz berdi: {str(e)}",
             reply_markup=ReplyKeyboardMarkup(
-                [["🟢 Sertifikat tayyorlash", "🔵 Taklifnoma yasash"],
+                [["🟢 Sertifikat tayyorlash", "🟢 Taklifnoma yasash"],
                  ["🟢 Namuna", "🟤 Diplom yasash"],
                  ["💰 Mening balansim", "💸 Balansni to‘ldirish"],
                  ["📞 Admin bilan aloqa"]], one_time_keyboard=True, resize_keyboard=True)
         )
         return START
-
-async def handle_pdf_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    config = load_config()
-    doc_type = context.user_data.get('doc_type', '')
-    user_data = load_user_data(user_id)
-    text = update.message.text.strip() if update.message else ""
-
-    # JPG faylini tozalash
-    output_jpg_path = context.user_data.get('output_jpg', '')
-    if os.path.exists(output_jpg_path):
-        try:
-            os.remove(output_jpg_path)
-            logger.info(f"Removed JPG file: {output_jpg_path}")
-        except Exception as e:
-            logger.error(f"Error removing JPG file {output_jpg_path}: {str(e)}")
-
-    # "Bosh menyuga qaytish" or "Yo‘q" ni qayta ishlash
-    if text in ["Bosh menyuga qaytish", "Yo‘q"]:
-        pdf_path = context.user_data.get('output_pdf', '')
-        if pdf_path and os.path.exists(pdf_path):
-            try:
-                os.remove(pdf_path)
-                logger.info(f"Removed PDF file: {pdf_path}")
-                context.user_data.pop('output_pdf', None)
-            except Exception as e:
-                logger.error(f"Error removing PDF file {pdf_path}: {str(e)}")
-        await update.message.reply_text(
-            "✅ PDF so‘rovi bekor qilindi." if text == "Yo‘q" else "Asosiy menyuga qaytdingiz.",
-            reply_markup=ReplyKeyboardMarkup(
-                [["🟢 Sertifikat tayyorlash", "🟢 Taklifnoma yasash"],
-                 ["🟢 Namuna orqali yasash", "🟢 Diplom yasash"],
-                 ["💰 Mening balansim", "💸 Balansni to‘ldirish"],
-                 ["📞 Biz bilan aloqa"]],
-                one_time_keyboard=True, resize_keyboard=True
-            )
-        )
-        return START
-
-    # "Ha" ni qayta ishlash (PDF yaratish)
-    if text == "Ha":
-        # Balansni tekshirish
-        if user_data.get('balance', 5000) < config['PDF_COST']:
-            await update.message.reply_text(
-                f"❌ Balansingizda yetarli mablag‘ yo‘q. 💵Joriy balans: {user_data.get('balance', 5000)} so‘m. "
-                f"PDF narxi: {config['PDF_COST']} so‘m.\nIltimos, balansingizni to‘ldiring.",
-                reply_markup=ReplyKeyboardMarkup([["💸 Balansni to‘ldirish"]], one_time_keyboard=True, resize_keyboard=True)
-            )
-            return BALANCE
-
-        try:
-            # Vaqt belgisi va fayl yo‘llarini yaratish
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_pptx = os.path.join(TEMP_PATH, f"output_{user_id}_{timestamp}.pptx")
-            output_pdf = os.path.join(TEMP_PATH, f"output_{user_id}_{timestamp}.pdf")
-            logger.info(f"Generating PDF for user {user_id}: {output_pdf}")
-
-            # PPTX faylini foydalanuvchi ma'lumotlari bilan qayta yaratish
-            prs = Presentation(context.user_data.get('selected_template'))
-            replacements = {
-                "{qr_code}": context.user_data.get('qr_code_replacement', "")
-            }
-            qr_code_path = None
-            if context.user_data.get('has_qr_code_tag') and context.user_data.get('qr_code_data'):
-                qr_code_path = os.path.join(TEMP_PATH, f"qr_code_{user_id}_{timestamp}.png")
-                create_qr_code(context.user_data['qr_code_data'], qr_code_path)
-                logger.info(f"Generated QR code at {qr_code_path}")
-
-            # Hujjat turiga qarab almashtirishlarni amalga oshirish
-            if doc_type == 'Sertifikat':
-                replacements.update({
-                    "{taqdirlangan}": context.user_data.get('taqdirlangan', ""),
-                    "{taqdirlovchi}": context.user_data.get('taqdirlovchi', ""),
-                    "{sertifikat_matni}": context.user_data.get('sertifikat_matni', ""),
-                    "{sana}": context.user_data.get('sana', "")
-                })
-                success = await replace_text_and_font(
-                    prs,
-                    replacements,
-                    taqdirlanuvchi_font=context.user_data.get('taqdirlanuvchi_font'),
-                    other_font=context.user_data.get('other_font'),
-                    sana_font=context.user_data.get('other_font'),
-                    qr_code_path=qr_code_path
-                )
-                if not success:
-                    raise Exception("Failed to replace text and font for Sertifikat")
-            elif doc_type == 'Taklifnoma':
-                replacements.update({
-                    "{info_text}": context.user_data.get('info_text', ""),
-                    "{manzil_va_ega}": context.user_data.get('manzil_va_ega', "")
-                })
-                success = await replace_text_and_font(
-                    prs,
-                    replacements,
-                    info_text_font=context.user_data.get('info_text_font'),
-                    manzil_va_ega_font=context.user_data.get('manzil_va_ega_font'),
-                    qr_code_path=qr_code_path
-                )
-                if not success:
-                    raise Exception("Failed to replace text and font for Taklifnoma")
-            elif doc_type == 'Shablon':
-                replacements.update({
-                    "{shablon_nomi}": context.user_data.get('shablon_nomi', ""),
-                    "{shablon_matni}": context.user_data.get('shablon_matni', ""),
-                    "{taqdirlovchi}": context.user_data.get('taqdirlovchi', ""),
-                    "{sana}": context.user_data.get('sana', "")
-                })
-                success = await replace_text_and_font(
-                    prs,
-                    replacements,
-                    shablon_nomi_font=context.user_data.get('shablon_nomi_font'),
-                    shablon_matni_font=context.user_data.get('shablon_matni_font'),
-                    shablon_sana_font=context.user_data.get('shablon_sana_font'),
-                    qr_code_path=qr_code_path
-                )
-                if not success:
-                    raise Exception("Failed to replace text and font for Shablon")
-            elif doc_type == 'Diplom':
-                replacements.update({
-                    "{taqdirlangan}": context.user_data.get('taqdirlangan', ""),
-                    "{taqdirlovchi}": context.user_data.get('taqdirlovchi', ""),
-                    "{diplom_matni}": context.user_data.get('diplom_matni', ""),
-                    "{sana}": context.user_data.get('sana', "")
-                })
-                success = await replace_text_and_font(
-                    prs,
-                    replacements,
-                    taqdirlanuvchi_font=context.user_data.get('taqdirlanuvchi_font'),
-                    other_font=context.user_data.get('other_font'),
-                    sana_font=context.user_data.get('other_font'),
-                    diplom_matni_font=context.user_data.get('other_font'),
-                    qr_code_path=qr_code_path
-                )
-                if not success:
-                    raise Exception("Failed to replace text and font for Diplom")
-
-            # PPTX faylini saqlash
-            prs.save(output_pptx)
-            logger.info(f"Saved PPTX to {output_pptx}")
-
-            # PPTX ni PDF ga aylantirish
-            success = await convert_pptx_to_pdf(output_pptx, output_pdf, context)
-            if not success:
-                raise Exception("PDF faylini yaratishda xatolik yuz berdi")
-
-            logger.info(f"Converted PPTX to PDF: {output_pdf}")
-
-            # Vaqtinchalik fayllarni tozalash
-            with file_lock:
-                for file_path in [output_pptx, qr_code_path]:
-                    if file_path and os.path.exists(file_path):
-                        try:
-                            os.remove(file_path)
-                            logger.info(f"Removed file: {file_path}")
-                        except Exception as e:
-                            logger.error(f"Error removing file {file_path}: {str(e)}")
-
-            # Balansdan PDF narxini yechish
-            user_data['balance'] -= config['PDF_COST']
-            user_data['result_count'] = user_data.get('result_count', 0) + 1
-            save_user_data(user_id, user_data)
-            logger.info(f"Deducted {config['PDF_COST']} from user {user_id}'s balance. New balance: {user_data['balance']}")
-
-            # PDF fayl nomini hujjat turiga qarab belgilash
-            pdf_filename = "Natija.pdf"
-            if doc_type == 'Sertifikat':
-                taqdirlanuvchi = context.user_data.get('taqdirlangan', '').replace(" ", "_")
-                pdf_filename = f"Sertifikat_{taqdirlanuvchi}.pdf"
-            elif doc_type == 'Taklifnoma':
-                pdf_filename = "Taklifnoma.pdf"
-            elif doc_type == 'Shablon':
-                pdf_filename = "Shablon.pdf"
-            elif doc_type == 'Diplom':
-                taqdirlanuvchi = context.user_data.get('taqdirlangan', '').replace(" ", "_")
-                pdf_filename = f"Diplom_{taqdirlanuvchi}.pdf"
-
-            # Hujjat turiga qarab caption belgilash
-            caption = "✅ Natijangiz PDF formatda tayyor bo‘ldi!"
-            if doc_type == 'Sertifikat':
-                caption = "✅ Sertifikatingiz PDF formatda tayyor bo‘ldi!"
-            elif doc_type == 'Taklifnoma':
-                caption = "✅ Taklifnomangiz PDF formatda tayyor bo‘ldi!"
-            elif doc_type == 'Diplom':
-                caption = "✅ Diplomingiz PDF formatda tayyor bo‘ldi!"
-
-            # PDF faylini foydalanuvchiga yuborish
-            try:
-                with open(output_pdf, "rb") as pdf:
-                    await update.message.reply_document(
-                        document=pdf,
-                        filename=pdf_filename,
-                        caption=f"{caption}\n"
-                                f"💸Balansingizdan {config['PDF_COST']} so‘m yechildi.\n"
-                                f"💵Joriy balans: {user_data['balance']} so‘m\n"
-                                f"📊Umumiy natijalar soni: {user_data['result_count']}",
-                        reply_markup=ReplyKeyboardMarkup(
-                            [["🟢 Sertifikat tayyorlash", "🟢 Taklifnoma yasash"],
-                             ["🟢 Namuna orqali yasash", "🟢 Diplom yasash"],
-                             ["💰 Mening balansim", "💸 Balansni to‘ldirish"],
-                             ["📞 Biz bilan aloqa"]],
-                            one_time_keyboard=True, resize_keyboard=True
-                        )
-                    )
-                    logger.info(f"PDF sent to user {user_id}: {pdf_filename}")
-            finally:
-                # PDF faylini tozalash
-                with file_lock:
-                    if os.path.exists(output_pdf):
-                        try:
-                            os.remove(output_pdf)
-                            logger.info(f"Removed PDF file: {output_pdf}")
-                        except Exception as e:
-                            logger.error(f"Error removing PDF file {output_pdf}: {str(e)}")
-                    context.user_data.pop('output_pdf', None)
-
-            return START
-
-        except Exception as e:
-            logger.error(f"PDF generation failed for user {user_id}: {str(e)}", exc_info=True)
-            # Xatolik yuz berganda vaqtinchalik fayllarni tozalash
-            with file_lock:
-                for file_path in [output_pptx, output_pdf, qr_code_path]:
-                    if file_path and os.path.exists(file_path):
-                        try:
-                            os.remove(file_path)
-                            logger.info(f"Removed file: {file_path}")
-                        except Exception as e:
-                            logger.error(f"Error removing file {file_path}: {str(e)}")
-                context.user_data.pop('output_pdf', None)
-
-            await update.message.reply_text(
-                f"❌ PDF faylni tayyorlashda xatolik yuz berdi: {str(e)}",
-                reply_markup=ReplyKeyboardMarkup(
-                    [["🟢 Sertifikat tayyorlash", "🟢 Taklifnoma yasash"],
-                     ["🟢 Namuna orqali yasash", "🟢 Diplom yasash"],
-                     ["💰 Mening balansim", "💸 Balansni to‘ldirish"],
-                     ["📞 Biz bilan aloqa"]],
-                    one_time_keyboard=True, resize_keyboard=True
-                )
-            )
-            return START
-
-    await update.message.reply_text(
-        "📲Iltimos, quyidagi tugmalardan birini tanlang:",
-        reply_markup=ReplyKeyboardMarkup([["Ha"], ["Yo‘q"], ["Bosh menyuga qaytish"]], one_time_keyboard=True, resize_keyboard=True)
-    )
-    return PDF_CONFIRM
 
 async def any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -3506,7 +3227,6 @@ def main():
             ADMIN_MESSAGE_CONTENT: [
                 MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO | filters.FORWARDED, handle_admin_message_content)
             ],
-            PDF_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_pdf_confirm)],
             CONTACT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_contact)],
             CONTACT_MESSAGE: [
                 MessageHandler(filters.TEXT | filters.PHOTO, handle_contact_message),

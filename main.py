@@ -3438,36 +3438,27 @@ async def start_queue_worker():
     if not queue_worker_running:
         asyncio.create_task(queue_worker())
 
-async def handle(request):
-    return web.Response(text="✅ Bot Render.com da ishlayapti!")
-
-
-async def start_bot():
+def main():
     logger.info("Bot ishga tushmoqda...")
-
     config = load_config()
-
     if not os.path.exists('bot_db.sqlite'):
-        logger.warning("bot_db.sqlite yaratilmoqda...")
-
+        logger.warning("bot_db.sqlite fayli yaratilmoqda...")
     try:
         init_db()
         check_fonts()
-        logger.info("Ma'lumotlar bazasi ishga tushdi")
+        logger.info("Ma'lumotlar bazasi muvaffaqiyatli ishga tushdi")
     except Exception as e:
-        logger.error(f"DB xato: {e}")
+        logger.error(f"Ma'lumotlar bazasini ishga tushirishda xato: {str(e)}")
         return
-
     app = ApplicationBuilder().token(config['BOT_TOKEN']).build()
-
-    # Queue Worker
+    
+    # Queue worker ni ishga tushirish
     async def post_init(application):
         await start_queue_worker()
-
+    
     app.post_init = post_init
 
     app.add_error_handler(error_handler)
-
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
@@ -3513,8 +3504,7 @@ async def start_bot():
             ADMIN_MESSAGE_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_message_type)],
             ADMIN_MESSAGE_RECIPIENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_message_recipient)],
             ADMIN_MESSAGE_CONTENT: [
-                MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO | filters.FORWARDED,
-                               handle_admin_message_content)
+                MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO | filters.FORWARDED, handle_admin_message_content)
             ],
             PDF_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_pdf_confirm)],
             CONTACT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_contact)],
@@ -3523,7 +3513,7 @@ async def start_bot():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_contact_message)
             ],
             QR_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_qr_code)]
-        ],
+        },
         fallbacks=[
             CommandHandler("start", start),
             CommandHandler("admin", admin_panel),
@@ -3536,37 +3526,16 @@ async def start_bot():
 
     while True:
         try:
-            await app.run_polling(
+            app.run_polling(
                 poll_interval=1.0,
                 timeout=30,
                 drop_pending_updates=True
             )
         except Exception as e:
-            logger.error(f"Polling xato: {e}")
-            await asyncio.sleep(2)
+            logger.error(f"Pollingda xatolik: {str(e)}")
+            time.sleep(2)
+            continue
 
-async def main():
-    # Botni fon rejimida ishlatamiz
-    asyncio.create_task(start_bot())
-
-    # Minimal web server (Render uchun majburiy)
-    app = web.Application()
-    app.router.add_get("/", handle)
-
-    port = int(os.environ.get("PORT", 8080))
-    print(f"🌐 Render web server {port}-portda ishga tushdi")
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-
-    # Serverni doimiy ushlab turish
-    while True:
-        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        logger.error(f"Asosiy xato: {e}")
+    main()

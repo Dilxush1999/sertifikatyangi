@@ -38,7 +38,6 @@ import shutil
 from contextlib import contextmanager
 import time
 import qrcode
-from telegram.ext import Application
 
 # .exe fayli uchun dinamik yo‘l
 if getattr(sys, 'frozen', False):
@@ -130,52 +129,16 @@ document_queue = asyncio.Queue()
 queue_worker_running = False
 
 def load_config():
-    """Konfiguratsiyani environment vars, config.json va defaultdan yuklash"""
     try:
-        # Avval environment vars dan o'qish (afzallik)
-        config = {
-            'BOT_TOKEN': os.environ.get('BOT_TOKEN'),
-            'CERTIFICATE_COST': int(os.environ.get('CERTIFICATE_COST', 1000)),
-            'TAKLIFNOMA_COST': int(os.environ.get('TAKLIFNOMA_COST', 1000)),
-            'SHABLON_COST': int(os.environ.get('SHABLON_COST', 1000)),
-            'DIPLOM_COST': int(os.environ.get('DIPLOM_COST', 1000)),
-            'PDF_COST': int(os.environ.get('PDF_COST', 500)),
-            'REFERRAL_BONUS': int(os.environ.get('REFERRAL_BONUS', 1000))
-        }
-        
-        # BOT_TOKEN env da bo'lmasa, config.json dan o'qish
-        if not config['BOT_TOKEN']:
-            try:
-                with open(CONFIG_PATH, 'r', encoding='utf-8') as f:  # CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
-                    json_config = json.load(f)
-                    config['BOT_TOKEN'] = json_config.get('BOT_TOKEN', config['BOT_TOKEN'])
-            except FileNotFoundError:
-                logger.warning(f"config.json fayli topilmadi: {CONFIG_PATH}")
-            except json.JSONDecodeError:
-                logger.error("config.json fayli noto'g'ri formatda")
-        
-        # Boshqa kalitlar uchun ham config.json dan o'qish (agar env da bo'lmasa)
-        if os.path.exists(CONFIG_PATH):
-            try:
-                with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-                    json_config = json.load(f)
-                    for key in ['CERTIFICATE_COST', 'TAKLIFNOMA_COST', 'SHABLON_COST', 'DIPLOM_COST', 'PDF_COST', 'REFERRAL_BONUS']:
-                        if not os.environ.get(key) and key in json_config:
-                            config[key] = int(json_config.get(key, config[key]))
-            except (FileNotFoundError, json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"config.json dan o'qishda xato: {str(e)}. Default qiymatlar ishlatiladi.")
-        
-        # Majburiy kalitlarni tekshirish
-        required_keys = ['BOT_TOKEN']
-        missing_keys = [key for key in required_keys if not config[key]]
+        with open('config.json', 'r') as f:
+            config = json.load(f)
+        required_keys = ['BOT_TOKEN', 'CERTIFICATE_COST', 'TAKLIFNOMA_COST', 'SHABLON_COST', 'DIPLOM_COST', 'PDF_COST', 'REFERRAL_BONUS']
+        missing_keys = [key for key in required_keys if key not in config]
         if missing_keys:
-            raise KeyError(f"Konfiguratsiyada quyidagi majburiy kalitlar yo‘q: {missing_keys}")
-        
-        logger.info("Konfiguratsiya muvaffaqiyatli yuklandi (manba: env vars va config.json)")
+            raise KeyError(f"Config faylida quyidagi kalitlar yo‘q: {missing_keys}")
         return config
-        
     except Exception as e:
-        logger.error(f"Konfiguratsiya yuklashda xato: {str(e)}")
+        logger.error(f"Konfiguratsiya faylini yuklashda xato: {str(e)}")
         raise
 
 @contextmanager
@@ -3476,29 +3439,11 @@ async def start_queue_worker():
     if not queue_worker_running:
         asyncio.create_task(queue_worker())
 
-def run_async_loop(loop):
-    """Async loop ni alohida threadda ishga tushirish"""
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
-
-async def dummy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bu state ishlayapti! Haqiqiy logic qo'shing.")
-    return ConversationHandler.END  # Yoki keyingi state ga o'ting
-    
 def main():
     logger.info("Bot ishga tushmoqda...")
     config = load_config()
-    
-    # Temp va boshqa papkalarni sozlash
-    global BASE_DIR, TEMP_PATH, DB_PATH, FONT_DIR
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    TEMP_PATH = '/tmp'  # Render-da temp fayllar uchun
-    DB_PATH = os.path.join(TEMP_PATH, 'bot_db.sqlite')  # Vaqtinchalik DB
-    FONT_DIR = os.path.join(BASE_DIR, 'Font')
-    
-    if not os.path.exists(TEMP_PATH):
-        os.makedirs(TEMP_PATH)
-    
+    if not os.path.exists('bot_db.sqlite'):
+        logger.warning("bot_db.sqlite fayli yaratilmoqda...")
     try:
         init_db()
         check_fonts()
@@ -3506,13 +3451,15 @@ def main():
     except Exception as e:
         logger.error(f"Ma'lumotlar bazasini ishga tushirishda xato: {str(e)}")
         return
-    
-    # Telegram bot application (polling rejimi — webhook o'rniga)
     app = ApplicationBuilder().token(config['BOT_TOKEN']).build()
     
-    app.add_error_handler(error_handler)
+    # Queue worker ni ishga tushirish
+    async def post_init(application):
+        await start_queue_worker()
     
-    # Conversation handler (to'liq states bilan — dummy handler lar bilan)
+    app.post_init = post_init
+
+    app.add_error_handler(error_handler)
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
@@ -3520,45 +3467,53 @@ def main():
             MessageHandler(filters.TEXT & ~filters.COMMAND, any_message)
         ],
         states={
-            START: [MessageHandler(filters.TEXT & ~filters.COMMAND, any_message)],
-            DOCUMENT_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            TEMPLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            TAQDIRLANUVCHI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            SHRIFT1: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            TAQDIRLOVCHI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            SERTIFIKAT_MATNI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            SHRIFT2: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            SANA: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            BALANCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            PAYMENT_METHOD: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            CARD_PAYMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            UPLOAD_CHECK: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            ADMIN_PANEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            ADMIN_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            ADMIN_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            ADMIN_TOPUP: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            INFO_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            MANZIL_VA_EGA: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            SHABLON: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            SHABLON_NOMI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            SHABLON_SHRIFT1: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            SHABLON_MATNI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            SHABLON_SHRIFT2: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            SHABLON_SHRIFT3: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            TAKLIFNOMA_SHRIFT1: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            TAKLIFNOMA_SHRIFT2: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            PDF_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            DIPLOM_MATNI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            ADMIN_MESSAGE_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            ADMIN_MESSAGE_CONTENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            ADMIN_MESSAGE_RECIPIENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            CONTACT: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            CONTACT_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            CONFIG_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            SET_NEW_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            ADMIN_FOYDALANUVCHI: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
-            QR_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, dummy_handler)],
+            START: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_start)],
+            DOCUMENT_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_start)],
+            TEMPLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_template)],
+            SHABLON: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_shablon)],
+            SHABLON_NOMI: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_shablon_nomi)],
+            SHABLON_SHRIFT1: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_shablon_shrift1)],
+            SHABLON_MATNI: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_shablon_matni)],
+            SHABLON_SHRIFT2: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_shablon_shrift2)],
+            SHABLON_SHRIFT3: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_shablon_shrift3)],
+            TAQDIRLANUVCHI: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_taqdirlanuvchi)],
+            TAKLIFNOMA_SHRIFT1: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_taklifnoma_shrift1)],
+            TAKLIFNOMA_SHRIFT2: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_taklifnoma_shrift2)],
+            SHRIFT1: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_shrift1)],
+            TAQDIRLOVCHI: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_taqdirlovchi)],
+            SERTIFIKAT_MATNI: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_sertifikat_matni)],
+            DIPLOM_MATNI: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_diplom_matni)],
+            SHRIFT2: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_shrift2)],
+            SANA: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_sana)],
+            INFO_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_info_text)],
+            MANZIL_VA_EGA: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_manzil_va_ega)],
+            BALANCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_balance)],
+            PAYMENT_METHOD: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_payment_method)],
+            CARD_PAYMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_card_payment)],
+            UPLOAD_CHECK: [
+                MessageHandler(filters.Document.ALL | filters.PHOTO, handle_upload_check),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_upload_check)
+            ],
+            COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_comment)],
+            ADMIN_PANEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_panel)],
+            ADMIN_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_user)],
+            ADMIN_ACTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_action)],
+            ADMIN_FOYDALANUVCHI: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_foydalanuvchi)],
+            ADMIN_TOPUP: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_topup)],
+            CONFIG_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_config_price)],
+            SET_NEW_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_set_new_price)],
+            ADMIN_MESSAGE_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_message_type)],
+            ADMIN_MESSAGE_RECIPIENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_message_recipient)],
+            ADMIN_MESSAGE_CONTENT: [
+                MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO | filters.FORWARDED, handle_admin_message_content)
+            ],
+            PDF_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_pdf_confirm)],
+            CONTACT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_contact)],
+            CONTACT_MESSAGE: [
+                MessageHandler(filters.TEXT | filters.PHOTO, handle_contact_message),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_contact_message)
+            ],
+            QR_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_qr_code)]
         },
         fallbacks=[
             CommandHandler("start", start),
@@ -3570,9 +3525,18 @@ def main():
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(handle_callback_query))
 
-    # Polling rejimini ishga tushirish (parallel, qotmasdan — drop_pending_updates=True bilan)
-    logger.info("Bot polling rejimida ishga tushmoqda...")
-    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
+    while True:
+        try:
+            app.run_polling(
+                poll_interval=1.0,
+                timeout=30,
+                drop_pending_updates=True
+            )
+        except Exception as e:
+            logger.error(f"Pollingda xatolik: {str(e)}")
+            time.sleep(2)
+            continue
+
 
 if __name__ == "__main__":
     main()
